@@ -18,15 +18,14 @@ void print_string(const char* str) {
 }
 
 char get_char() {
-    char c;
+    unsigned short ax_val;
     asm volatile (
-        "movb $0x00, %%ah\n"
+        "xor %%ah, %%ah\n"
         "int $0x16\n"
-        : "=al"(c)
+        : "=a"(ax_val)
         :
-        : "ah"
     );
-    return c;
+    return (char)(ax_val & 0xFF);  // Use AL for ASCII
 }
 
 void echo() {
@@ -46,9 +45,9 @@ void echo() {
             continue;
         }
         if (c == 0x0D) {  // Enter
+            buffer[index] = 0;  // Ensure null termination
             print_char(0x0D);
             print_char(0x0A);
-            buffer[index] = 0;  // Null-terminate
             print_string(buffer);
             print_char(0x0D);
             print_char(0x0A);
@@ -63,7 +62,12 @@ void echo() {
 
 __attribute__((section(".text.kernel_main"))) // must keep
 void kernel_main() {
-    print_string("Hello from the kernel!\r\n");
+    asm volatile (
+        "mov $0x100, %ax\n"
+        "mov %ax, %ds\n"
+    );
+    print_string("Hello from the kernel!\r\n"); // doesnt print
+    print_char('T'); // does print
     echo();
     while (1);
 }
