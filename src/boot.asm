@@ -16,127 +16,65 @@ puts:
     push si
     push ax
     push bx
-
 .loop:
-    lodsb               ; loads next character in AL
-    or al, al           ; check for null terminator
+    lodsb               ; Load next character into AL
+    or al, al           ; Check for null terminator
     jz .done
-
-    mov ah, 0x0E        ; BIOS interrupt to print character
-    mov bh, 0           ; Set page number to 0
-    int 0x10
-
+    mov ah, 0x0E        ; BIOS teletype function
+    mov bh, 0           ; Page 0
+    int 0x10            ; Print character
     jmp .loop
-
 .done:
     pop bx
     pop ax
-    pop si    
-    ret
-
-
-;
-; Echo function - Reads input, echoes it, and prints full line after Enter
-;
-echo:
-    mov di, 0             ; DI is our buffer index
-
-.echo_loop:
-    mov ah, 0x00          ; BIOS keyboard interrupt - wait for keypress
-    int 0x16              ; AL = key pressed
-
-    cmp al, 0x08          ; Check if Backspace (0x08)
-    je .handle_backspace  
-
-    cmp al, 0x0D          ; Check if Enter (0x0D)
-    je .print_buffer      
-
-    cmp di, BUFFER_SIZE   ; Check if buffer is full
-    jae .echo_loop        ; Ignore extra input if full
-
-    ; Store character in buffer
-    mov [input_buffer + di], al
-    inc di                ; Move to next position in buffer
-
-    ; Print character immediately
-    mov ah, 0x0E
-    int 0x10
-
-    jmp .echo_loop        ; Keep reading characters
-
-.handle_backspace:
-    cmp di, 0             ; If at start, ignore
-    je .echo_loop
-
-    dec di                ; Move buffer index back
-
-    ; Print backspace (erase last char on screen)
-    mov al, 0x08          ; Backspace
-    mov ah, 0x0E
-    int 0x10
-    mov al, ' '           ; Erase character visually
-    int 0x10
-    mov al, 0x08          ; Move cursor back again
-    int 0x10
-
-    jmp .echo_loop
-
-.print_buffer:
-    ; Print newline first
-    mov al, 0x0D
-    mov ah, 0x0E
-    int 0x10
-    mov al, 0x0A
-    int 0x10
-
-    ; Null-terminate the buffer
-    mov byte [input_buffer + di], 0
-
-    ; Print stored input
-    mov si, input_buffer
-    call puts
-
-    ret
-
-; Function to print a newline (carriage return + line feed)
-print_newline:
-    mov al, 0x0D          ; Carriage return
-    mov ah, 0x0E
-    int 0x10
-
-    mov al, 0x0A          ; Line feed
-    int 0x10
+    pop si
     ret
 
 main:
+    ; Set up segment registers
     mov ax, 0
-    mov ds, ax
-    mov es, ax
+    mov ds, ax          ; Data segment
+    mov es, ax          ; Extra segment
     
-    ; Setup stack
+    ; Set up stack (initially below 0x7C00)
     mov ss, ax
     mov sp, 0x7C00  
 
-    ; Print "Welcome to mxOS" message
+    ; Print welcome message
     mov si, msg_welcome
     call puts
-    call print_newline
 
-    ; Print "Type something: "
-    mov si, msg_echo
+    ; Load kernel from floppy (sector 2)
+    mov ah, 0x02        ; BIOS read sectors
+    mov al, 1           ; Read 1 sector (adjust if kernel > 512 bytes)
+    mov ch, 0           ; Cylinder 0
+    mov cl, 2           ; Sector 2 (1-based, after bootloader)
+    mov dh, 0           ; Head 0
+    mov dl, 0           ; Drive 0 (floppy)
+    mov bx, 0x1000      ; Destination (ES:BX = 0x1000)
+    int 0x13            ; BIOS disk interrupt
+    jc .disk_error      ; Jump if error
+
+    ; Set up stack for kernel at 0x100:0xFFFE
+    cli                 ; Disable interrupts
+    mov ax, 0x100       ; Segment 0x100 (0x1000 base)
+    mov ss, ax          ; Stack segment
+    mov sp, 0xFFFE      ; Stack pointer at top of segment
+    sti                 ; Re-enable interrupts
+
+    ; Jump to kernel
+    jmp 0x100:0x0000    ; Physical address 0x1000
+
+.disk_error:
+    mov si, msg_error
     call puts
-
-    ; Call echo function
-    call echo
-
-    hlt
+    jmp .halt
 
 .halt:
     jmp .halt
 
-msg_welcome: db '--- Welcome to mxOS ---', 0
-msg_echo: db 'Type something: ', 0
-input_buffer: times BUFFER_SIZE db 0  ; Reserve space for user input
+msg_welcome: db '--- Welcome to mxOS ---', ENDL, 0
+msg_error: db 'Disk read error!', ENDL, 0
 
 times 510-($-$$) db 0
-dw 0AA55h
+dw 0xAA55
